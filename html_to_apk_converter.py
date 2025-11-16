@@ -15,6 +15,7 @@ import threading
 import time
 import queue
 import configparser
+import re
 from typing import Optional, Tuple, List
 
 import tkinter as tk
@@ -23,7 +24,7 @@ from tkinter.font import Font
 
 # Try to import PIL for image processing
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageTk
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -196,50 +197,93 @@ class HTMLToAPKConverter:
         """Load configuration from file"""
         if not self.config_file.exists():
             return
-            
+
         try:
             config = configparser.ConfigParser()
-            config.read(self.config_file)
-            
-            if 'Settings' in config:
-                settings = config['Settings']
-                
-                # Load each setting if it exists
+            # Use UTF-8 encoding to handle all characters
+            config.read(self.config_file, encoding='utf-8')
+
+            if 'Settings' not in config:
+                return
+
+            settings = config['Settings']
+
+            # Load each setting if it exists with error handling
+            try:
                 if 'html_directory' in settings:
                     html_dir = settings['html_directory']
-                    if Path(html_dir).exists():
+                    if html_dir and Path(html_dir).exists():
                         self.html_dir_var.set(html_dir)
-                
+            except Exception as e:
+                print(f"Error loading html_directory: {e}")
+
+            try:
                 if 'output_directory' in settings:
                     self.output_dir_var.set(settings['output_directory'])
-                
+            except Exception as e:
+                print(f"Error loading output_directory: {e}")
+
+            try:
                 if 'app_name' in settings:
                     self.app_name_var.set(settings['app_name'])
-                
+            except Exception as e:
+                print(f"Error loading app_name: {e}")
+
+            try:
                 if 'app_id' in settings:
                     self.app_id_var.set(settings['app_id'])
-                
-                # Load asset settings
-                if 'icon_file' in settings and Path(settings['icon_file']).exists():
-                    self.icon_file_var.set(settings['icon_file'])
-                
-                if 'splash_file' in settings and Path(settings['splash_file']).exists():
-                    self.splash_file_var.set(settings['splash_file'])
-                
+            except Exception as e:
+                print(f"Error loading app_id: {e}")
+
+            # Load asset settings
+            try:
+                if 'icon_file' in settings:
+                    icon_file = settings['icon_file']
+                    if icon_file and Path(icon_file).exists():
+                        self.icon_file_var.set(icon_file)
+            except Exception as e:
+                print(f"Error loading icon_file: {e}")
+
+            try:
+                if 'splash_file' in settings:
+                    splash_file = settings['splash_file']
+                    if splash_file and Path(splash_file).exists():
+                        self.splash_file_var.set(splash_file)
+            except Exception as e:
+                print(f"Error loading splash_file: {e}")
+
+            try:
                 if 'use_custom_assets' in settings:
                     self.use_custom_assets.set(settings.getboolean('use_custom_assets'))
-                
+            except Exception as e:
+                print(f"Error loading use_custom_assets: {e}")
+
+            try:
                 if 'auto_generate_assets' in settings:
                     self.auto_generate_assets.set(settings.getboolean('auto_generate_assets'))
-                    
-                # Load plugin selections
-                for key in self.plugins:
+            except Exception as e:
+                print(f"Error loading auto_generate_assets: {e}")
+
+            # Load plugin selections
+            for key in self.plugins:
+                try:
                     plugin_key = f'plugin_{key}'
                     if plugin_key in settings:
                         self.selected_plugins[key].set(settings.getboolean(plugin_key))
-                        
+                except Exception as e:
+                    print(f"Error loading plugin_{key}: {e}")
+
             print(f"Configuration loaded from {self.config_file}")
-            
+
+        except configparser.Error as e:
+            print(f"Configuration file is corrupted: {e}")
+            # Optionally backup corrupted config
+            try:
+                backup_file = self.config_file.with_suffix('.ini.bak')
+                shutil.copy2(self.config_file, backup_file)
+                print(f"Backed up corrupted config to {backup_file}")
+            except Exception:
+                pass
         except Exception as e:
             print(f"Failed to load configuration: {e}")
             
@@ -257,16 +301,23 @@ class HTMLToAPKConverter:
                 'use_custom_assets': str(self.use_custom_assets.get()),
                 'auto_generate_assets': str(self.auto_generate_assets.get())
             }
-            
+
             # Save plugin selections
             for key in self.plugins:
                 config['Settings'][f'plugin_{key}'] = str(self.selected_plugins[key].get())
-            
-            with open(self.config_file, 'w') as configfile:
+
+            # Write to temporary file first, then rename to avoid corruption
+            temp_file = self.config_file.with_suffix('.ini.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as configfile:
                 config.write(configfile)
-                
+
+            # Rename temp file to actual config file
+            temp_file.replace(self.config_file)
+
             print(f"Configuration saved to {self.config_file}")
-            
+
+        except IOError as e:
+            print(f"Failed to save configuration (I/O error): {e}")
         except Exception as e:
             print(f"Failed to save configuration: {e}")
             
@@ -750,76 +801,71 @@ class HTMLToAPKConverter:
     def update_icon_preview(self):
         """Update the icon preview"""
         icon_path = self.icon_file_var.get().strip()
-        
+
         if not icon_path or not Path(icon_path).exists():
             self.icon_preview_label.config(text="No icon selected", image="")
+            self.icon_preview_label.image = None
             return
-            
+
         try:
             img = Image.open(icon_path)
             info_text = f"Size: {img.width}x{img.height}\nFormat: {img.format}\nMode: {img.mode}"
-            
+
             if img.width < 512 or img.height < 512:
                 info_text += "\n⚠️ Too small (min 1024x1024)"
             elif img.width != img.height:
                 info_text += "\n⚠️ Not square"
             elif img.width >= 1024 and img.height >= 1024:
                 info_text += "\n✅ Good size"
-            
+
             preview_size = (64, 64)
             img_preview = img.copy()
             img_preview.thumbnail(preview_size, Image.Resampling.LANCZOS)
-            
-            import tkinter as tk
-            photo = tk.PhotoImage(data=self.pil_to_base64(img_preview))
-            
+
+            # Convert to PhotoImage using ImageTk
+            photo = ImageTk.PhotoImage(img_preview)
+
             self.icon_preview_label.config(text=info_text, image=photo, compound=tk.TOP)
-            self.icon_preview_label.image = photo
-            
+            self.icon_preview_label.image = photo  # Keep reference
+
         except Exception as e:
             self.icon_preview_label.config(text=f"Error loading image: {e}", image="")
+            self.icon_preview_label.image = None
             
     def update_splash_preview(self):
         """Update the splash screen preview"""
         splash_path = self.splash_file_var.get().strip()
-        
+
         if not splash_path or not Path(splash_path).exists():
             self.splash_preview_label.config(text="No splash screen selected", image="")
+            self.splash_preview_label.image = None
             return
-            
+
         try:
             img = Image.open(splash_path)
             info_text = f"Size: {img.width}x{img.height}\nFormat: {img.format}\nMode: {img.mode}"
-            
+
             if img.width < 1024 or img.height < 1024:
                 info_text += "\n⚠️ Too small (min 2732x2732)"
             elif img.width < 2732 or img.height < 2732:
                 info_text += "\n⚠️ Small for splash (rec 2732x2732)"
             else:
                 info_text += "\n✅ Good size"
-            
+
             preview_size = (64, 64)
             img_preview = img.copy()
             img_preview.thumbnail(preview_size, Image.Resampling.LANCZOS)
-            
-            import tkinter as tk
-            photo = tk.PhotoImage(data=self.pil_to_base64(img_preview))
-            
+
+            # Convert to PhotoImage using ImageTk
+            photo = ImageTk.PhotoImage(img_preview)
+
             self.splash_preview_label.config(text=info_text, image=photo, compound=tk.TOP)
-            self.splash_preview_label.image = photo
-            
+            self.splash_preview_label.image = photo  # Keep reference
+
         except Exception as e:
             self.splash_preview_label.config(text=f"Error loading image: {e}", image="")
+            self.splash_preview_label.image = None
             
-    def pil_to_base64(self, pil_image):
-        """Convert PIL image to base64 for tkinter PhotoImage"""
-        import io
-        import base64
-        
-        buffer = io.BytesIO()
-        pil_image.save(buffer, format='PNG')
-        img_str = base64.b64encode(buffer.getvalue()).decode()
-        return img_str
         
     def generate_android_icons(self, source_path, output_dir):
         """Generate all Android icon sizes from source image"""
@@ -1044,24 +1090,84 @@ class HTMLToAPKConverter:
         
         self.save_configuration()
         
+    def validate_app_id(self, app_id):
+        """Validate app ID format (reverse domain notation)"""
+        # Should be like com.example.myapp
+        pattern = r'^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'
+        return bool(re.match(pattern, app_id.lower()))
+
+    def sanitize_app_name(self, app_name):
+        """Sanitize app name to prevent issues"""
+        # Remove special characters, keep only alphanumeric, spaces, hyphens, underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9\s\-_]', '', app_name)
+        sanitized = sanitized.strip()
+        return sanitized if sanitized else "MyApp"
+
+    def validate_html_directory(self, html_dir):
+        """Validate HTML directory has required files"""
+        html_path = Path(html_dir)
+        if not html_path.exists():
+            return False, "Directory does not exist"
+
+        if not html_path.is_dir():
+            return False, "Path is not a directory"
+
+        index_html = html_path / "index.html"
+        if not index_html.exists():
+            return False, "index.html not found in directory"
+
+        return True, "Valid"
+
     def validate_input(self):
         """Validate user input"""
-        if not self.html_dir_var.get().strip():
+        html_dir = self.html_dir_var.get().strip()
+        if not html_dir:
             messagebox.showerror("Error", "Please select an HTML project directory")
             return False
-            
-        if not Path(self.html_dir_var.get()).exists():
-            messagebox.showerror("Error", "HTML project directory does not exist")
+
+        # Validate HTML directory
+        is_valid, error_msg = self.validate_html_directory(html_dir)
+        if not is_valid:
+            messagebox.showerror("Error", f"HTML project directory is invalid: {error_msg}")
             return False
-            
-        if not self.app_name_var.get().strip():
+
+        app_name = self.app_name_var.get().strip()
+        if not app_name:
             messagebox.showerror("Error", "Please enter an app name")
             return False
-            
-        if not self.app_id_var.get().strip():
+
+        # Sanitize app name
+        sanitized_name = self.sanitize_app_name(app_name)
+        if sanitized_name != app_name:
+            result = messagebox.askyesno(
+                "App Name Modified",
+                f"App name contains invalid characters.\n\n"
+                f"Original: {app_name}\n"
+                f"Sanitized: {sanitized_name}\n\n"
+                f"Use sanitized version?"
+            )
+            if result:
+                self.app_name_var.set(sanitized_name)
+            else:
+                return False
+
+        app_id = self.app_id_var.get().strip()
+        if not app_id:
             messagebox.showerror("Error", "Please enter an app ID")
             return False
-            
+
+        # Validate app ID format
+        if not self.validate_app_id(app_id):
+            messagebox.showerror(
+                "Invalid App ID",
+                "App ID must be in reverse domain format (e.g., com.example.myapp).\n\n"
+                "Rules:\n"
+                "- Must contain at least two segments separated by dots\n"
+                "- Each segment must start with a lowercase letter\n"
+                "- Can only contain lowercase letters, numbers, and underscores"
+            )
+            return False
+
         if not self.output_dir_var.get().strip():
             messagebox.showerror("Error", "Please specify an output directory")
             return False
@@ -1517,40 +1623,59 @@ class HTMLToAPKConverter:
             f"You can now test the APK on an Android device."
         )
         
-    # Original conversion methods adapted for the combined functionality
-    def run_command(self, command, cwd=None, shell=True, progress_message="Running command"):
-        """Run a command and return success status"""
+    def safe_run_command(self, command, cwd=None, timeout=300, progress_message="Running command"):
+        """Safely run a command and return success status
+
+        Args:
+            command: Either a string (will be split safely) or list of command parts
+            cwd: Working directory
+            timeout: Timeout in seconds
+            progress_message: Message to log on success
+        """
         if not self.is_building:
             return False
-            
+
         try:
+            # Convert string commands to list for safer execution
+            if isinstance(command, str):
+                # For simple npm/npx commands, split safely
+                cmd_list = command.split()
+            else:
+                cmd_list = command
+
             if self.debug_mode.get():
                 self.log(f"🛠 DEBUG: Working directory: {cwd or os.getcwd()}")
-                self.log(f"🛠 DEBUG: Shell mode: {shell}")
-                
-            self.log(f"🔧 Running: {command}")
-            
-            if os.name == 'nt':
-                shell = True
-            
-            if isinstance(command, list):
-                result = subprocess.run(command, cwd=cwd, shell=False, capture_output=True, 
-                                      text=True, timeout=300)
-            else:
-                result = subprocess.run(command, cwd=cwd, shell=shell, capture_output=True, 
-                                      text=True, timeout=300)
-            
+                self.log(f"🛠 DEBUG: Command list: {cmd_list}")
+
+            self.log(f"🔧 Running: {' '.join(cmd_list) if isinstance(cmd_list, list) else command}")
+
+            # Use shell=False for better security, except on Windows where some commands need shell
+            use_shell = os.name == 'nt' and isinstance(command, str)
+
+            result = subprocess.run(
+                cmd_list if not use_shell else command,
+                cwd=cwd,
+                shell=use_shell,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
             if self.debug_mode.get():
                 self.log(f"🛠 DEBUG: Return code: {result.returncode}")
                 if result.stderr and result.stderr.strip():
                     self.log(f"🛠 DEBUG: Full stderr: {result.stderr.strip()}")
-            
+
             if result.returncode != 0:
-                self.log(f"❌ Command failed: {command}")
+                self.log(f"❌ Command failed with return code {result.returncode}")
                 if result.stderr and result.stderr.strip():
-                    self.log(f"❌ Error: {result.stderr.strip()}")
+                    for line in result.stderr.strip().split('\n')[:10]:  # Limit error lines
+                        if line.strip():
+                            self.log(f"❌ {line.strip()}")
                 if result.stdout and result.stdout.strip():
-                    self.log(f"📄 Output: {result.stdout.strip()}")
+                    for line in result.stdout.strip().split('\n')[:10]:  # Limit output lines
+                        if line.strip():
+                            self.log(f"📄 {line.strip()}")
                 return False
             else:
                 if result.stdout and result.stdout.strip():
@@ -1559,8 +1684,12 @@ class HTMLToAPKConverter:
                             self.log(f"📄 {line.strip()}")
                 self.log(f"✅ {progress_message} completed successfully")
                 return True
+
         except subprocess.TimeoutExpired:
-            self.log(f"❌ Command timed out: {command}")
+            self.log(f"❌ Command timed out after {timeout} seconds")
+            return False
+        except FileNotFoundError as e:
+            self.log(f"❌ Command not found: {e}")
             return False
         except Exception as e:
             self.log(f"❌ Exception running command: {e}")
@@ -1568,37 +1697,63 @@ class HTMLToAPKConverter:
                 import traceback
                 self.log(f"🛠 DEBUG: Exception details: {traceback.format_exc()}")
             return False
+
+    # Keep old method for compatibility, redirect to new safe method
+    def run_command(self, command, cwd=None, shell=True, progress_message="Running command"):
+        """Run a command and return success status (legacy method)"""
+        return self.safe_run_command(command, cwd=cwd, timeout=300, progress_message=progress_message)
             
     def run_command_with_timeout(self, command, cwd=None, shell=True, timeout=300, progress_message="Running command"):
         """Run a command with extended timeout and better error handling"""
         if not self.is_building:
             return False
-            
+
+        process = None
         try:
-            self.log(f"🔧 Running: {command}")
-            
-            if isinstance(command, list):
-                process = subprocess.Popen(command, cwd=cwd, shell=False, 
-                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-                                         text=True, bufsize=1, universal_newlines=True)
+            # Convert string commands to list for safer execution
+            if isinstance(command, str):
+                cmd_list = command.split()
             else:
-                process = subprocess.Popen(command, cwd=cwd, shell=shell, 
-                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-                                         text=True, bufsize=1, universal_newlines=True)
-            
+                cmd_list = command
+
+            self.log(f"🔧 Running: {' '.join(cmd_list) if isinstance(cmd_list, list) else command}")
+
+            # Use shell=False for better security, except on Windows where some commands need shell
+            use_shell = os.name == 'nt' and isinstance(command, str)
+
+            process = subprocess.Popen(
+                cmd_list if not use_shell else command,
+                cwd=cwd,
+                shell=use_shell,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
             output_lines = []
             start_time = time.time()
-            
+
             while True:
                 if not self.is_building:
+                    self.log("⚠️ Operation cancelled by user")
                     process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
                     return False
-                
+
                 if time.time() - start_time > timeout:
                     self.log(f"❌ Command timed out after {timeout} seconds")
                     process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
                     return False
-                
+
                 try:
                     output = process.stdout.readline()
                     if output == '' and process.poll() is not None:
@@ -1607,23 +1762,41 @@ class HTMLToAPKConverter:
                         line = output.strip()
                         self.log(f"📄 {line}")
                         output_lines.append(line)
-                except:
+                except Exception:
                     pass
-                
+
                 time.sleep(0.1)
-            
+
             return_code = process.poll()
-            
+
             if return_code == 0:
                 self.log(f"✅ {progress_message} completed successfully")
                 return True
             else:
                 self.log(f"❌ Command failed with return code: {return_code}")
                 return False
-                
+
+        except FileNotFoundError as e:
+            self.log(f"❌ Command not found: {e}")
+            return False
         except Exception as e:
             self.log(f"❌ Exception running command: {e}")
+            if self.debug_mode.get():
+                import traceback
+                self.log(f"🛠 DEBUG: Exception details: {traceback.format_exc()}")
             return False
+        finally:
+            # Clean up process if it exists
+            if process is not None:
+                try:
+                    if process.poll() is None:  # Process still running
+                        process.terminate()
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                except Exception:
+                    pass
             
     def check_prerequisites(self):
         """Check if required tools are installed"""
@@ -1842,32 +2015,61 @@ export default config;
     def copy_html_files(self, html_dir, project_dir):
         """Copy HTML files to the www directory"""
         self.log("📂 Copying HTML files...")
-        
+
         www_dir = project_dir / "www"
-        
-        if www_dir.exists():
-            shutil.rmtree(www_dir)
-        www_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
-            html_path = Path(html_dir)
+            # Remove existing www directory if it exists
+            if www_dir.exists():
+                try:
+                    shutil.rmtree(www_dir)
+                    self.log("🗑️ Removed existing www directory")
+                except Exception as e:
+                    self.log(f"⚠️ Could not remove existing www directory: {e}")
+                    # Try to continue anyway
+
+            # Create www directory
+            www_dir.mkdir(parents=True, exist_ok=True)
+
+            html_path = Path(html_dir).resolve()
+            file_count = 0
+            dir_count = 0
+
+            # Copy all files and directories
             for item in html_path.iterdir():
-                if item.is_file():
-                    shutil.copy2(item, www_dir)
-                    self.log(f"📄 Copied: {item.name}")
-                elif item.is_dir():
-                    shutil.copytree(item, www_dir / item.name)
-                    self.log(f"📁 Copied directory: {item.name}")
-            
-            if not (www_dir / "index.html").exists():
-                self.log("❌ index.html not found in the HTML directory")
+                if not self.is_building:
+                    self.log("⚠️ Operation cancelled during file copy")
+                    return False
+
+                try:
+                    if item.is_file():
+                        dest_file = www_dir / item.name
+                        shutil.copy2(item, dest_file)
+                        self.log(f"📄 Copied: {item.name}")
+                        file_count += 1
+                    elif item.is_dir():
+                        dest_dir = www_dir / item.name
+                        shutil.copytree(item, dest_dir)
+                        self.log(f"📁 Copied directory: {item.name}")
+                        dir_count += 1
+                except PermissionError as e:
+                    self.log(f"⚠️ Permission denied copying {item.name}: {e}")
+                except Exception as e:
+                    self.log(f"⚠️ Error copying {item.name}: {e}")
+
+            # Verify index.html exists
+            index_html = www_dir / "index.html"
+            if not index_html.exists():
+                self.log("❌ index.html not found after copying")
                 return False
-            
-            self.log("✅ HTML files copied successfully")
+
+            self.log(f"✅ Copied {file_count} files and {dir_count} directories successfully")
             return True
-            
+
         except Exception as e:
             self.log(f"❌ Failed to copy HTML files: {e}")
+            import traceback
+            self.log(f"💥 Error details: {traceback.format_exc()}")
             return False
             
     def setup_android_platform(self, project_dir, app_name, app_id):
