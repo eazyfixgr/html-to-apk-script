@@ -2,6 +2,39 @@
 
 All notable changes to the HTML to APK Converter project.
 
+## [2.1.0] - 2024 - Asset Regeneration Feature
+
+### 🎉 NEW FEATURE
+
+#### 🔄 Asset Regeneration for Existing Projects
+- **Regenerate icons and splash screens without rebuilding the entire project!**
+- No need to create a new project when you want to change assets
+- Update icon and/or splash screen independently
+- Automatic Capacitor sync after regeneration
+- Simple workflow: Select new assets → Click "Regenerate Assets" → Build APK
+
+### How to Use:
+1. Navigate to "Assets (Icons & Splash)" tab
+2. Select new icon file and/or new splash screen file
+3. Click "🔄 Regenerate Assets for Existing Project" button
+4. Wait for regeneration and sync to complete
+5. Build APK with new assets using "Build APK" button
+
+### Technical Details:
+- Method: `regenerate_existing_project_assets()` (html_to_apk_converter.py:1298)
+- Validates project directory and asset files
+- Calls `generate_android_icons()` and `generate_splash_screens()`
+- Runs `npx cap sync android` to update Android project
+- Graceful error handling with detailed logging
+
+### Benefits:
+- **Saves time**: No need to recreate entire project structure
+- **Flexibility**: Update only the assets you want to change
+- **Efficiency**: Quick asset updates for iterative design work
+- **User-friendly**: Clear validation messages and progress feedback
+
+---
+
 ## [2.0.0] - 2024 - MAJOR UPDATE
 
 ### 🎉 NEW FEATURES (9 Major Additions)

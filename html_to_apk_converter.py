@@ -807,7 +807,27 @@ See NEW_FEATURES.md for complete guide!
         
         self.splash_preview_label = ttk.Label(self.splash_preview_frame, text="No splash screen selected")
         self.splash_preview_label.pack()
-        
+
+        # NEW: Regenerate assets button
+        regenerate_frame = ttk.LabelFrame(parent, text="Update Existing Project Assets", padding="10")
+        regenerate_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        regenerate_frame.columnconfigure(0, weight=1)
+
+        ttk.Label(regenerate_frame,
+                 text="Already created a project? You can regenerate icons and splash screens without rebuilding:",
+                 wraplength=600).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        self.regenerate_btn = ttk.Button(regenerate_frame,
+                                        text="🔄 Regenerate Assets for Existing Project",
+                                        command=self.regenerate_existing_project_assets,
+                                        state=state)
+        self.regenerate_btn.grid(row=1, column=0, sticky=tk.W, pady=5)
+
+        ttk.Label(regenerate_frame,
+                 text="This will update the icons and splash screens in your existing project directory.",
+                 foreground="gray",
+                 font=("TkDefaultFont", 9)).grid(row=2, column=0, sticky=tk.W, padx=20)
+
         # Set up traces for asset variables
         self.icon_file_var.trace_add('write', self.on_icon_changed)
         self.splash_file_var.trace_add('write', self.on_splash_changed)
@@ -815,7 +835,7 @@ See NEW_FEATURES.md for complete guide!
         self.splash_file_var.trace_add('write', self.auto_save_config)
         self.use_custom_assets.trace_add('write', self.auto_save_config)
         self.auto_generate_assets.trace_add('write', self.auto_save_config)
-        
+
         # Initial state update
         self.toggle_custom_assets()
 
@@ -1274,8 +1294,133 @@ See NEW_FEATURES.md for complete guide!
         except Exception as e:
             self.splash_preview_label.config(text=f"Error loading image: {e}", image="")
             self.splash_preview_label.image = None
-            
-        
+
+    def regenerate_existing_project_assets(self):
+        """Regenerate icons and splash screens for existing project without rebuilding"""
+        # 1. Validate output directory exists and is a Capacitor project
+        output_dir = self.output_dir_var.get().strip()
+        if not output_dir:
+            messagebox.showerror("Error", "Please select an output directory first")
+            return
+
+        output_path = Path(output_dir)
+        if not output_path.exists():
+            messagebox.showerror("Error", f"Output directory does not exist: {output_dir}")
+            return
+
+        # Check if it's a valid Capacitor project
+        android_dir = output_path / "android"
+        if not android_dir.exists():
+            messagebox.showerror("Error",
+                "This doesn't appear to be a valid Capacitor project.\n"
+                "The 'android' directory is missing.\n\n"
+                "Please create a project first before regenerating assets.")
+            return
+
+        # 2. Validate that at least one asset is selected
+        icon_path = self.icon_file_var.get().strip()
+        splash_path = self.splash_file_var.get().strip()
+
+        if not icon_path and not splash_path:
+            messagebox.showwarning("No Assets Selected",
+                "Please select at least one asset (icon or splash screen) to regenerate.")
+            return
+
+        # Validate files exist
+        if icon_path and not Path(icon_path).exists():
+            messagebox.showerror("Error", f"Icon file not found: {icon_path}")
+            return
+
+        if splash_path and not Path(splash_path).exists():
+            messagebox.showerror("Error", f"Splash screen file not found: {splash_path}")
+            return
+
+        # Confirm with user
+        assets_to_regenerate = []
+        if icon_path:
+            assets_to_regenerate.append("Icons")
+        if splash_path:
+            assets_to_regenerate.append("Splash Screens")
+
+        message = f"This will regenerate the following assets for the project at:\n{output_dir}\n\n"
+        message += "Assets to regenerate:\n" + "\n".join(f"  • {asset}" for asset in assets_to_regenerate)
+        message += "\n\nContinue?"
+
+        if not messagebox.askyesno("Confirm Regeneration", message):
+            return
+
+        # 3. Disable button and show progress
+        self.regenerate_btn.config(state='disabled')
+        self.log("=" * 50)
+        self.log("🔄 REGENERATING ASSETS FOR EXISTING PROJECT")
+        self.log("=" * 50)
+        self.log(f"Project directory: {output_dir}")
+
+        try:
+            success = True
+
+            # 4. Regenerate icons
+            if icon_path:
+                self.log(f"\n📱 Regenerating app icons from: {Path(icon_path).name}")
+                if not self.generate_android_icons(icon_path, output_dir):
+                    success = False
+                    self.log("❌ Failed to regenerate icons")
+
+            # 5. Regenerate splash screens
+            if splash_path:
+                self.log(f"\n🖼️ Regenerating splash screens from: {Path(splash_path).name}")
+                if not self.generate_splash_screens(splash_path, output_dir):
+                    success = False
+                    self.log("❌ Failed to regenerate splash screens")
+
+            if not success:
+                self.log("\n⚠️ Some assets failed to regenerate. See errors above.")
+                messagebox.showwarning("Partial Success",
+                    "Some assets could not be regenerated. Check the build log for details.")
+                return
+
+            # 6. Run Capacitor sync
+            self.log("\n🔄 Syncing assets to Android project...")
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(output_dir)
+                if self.run_command_with_timeout("npx cap sync android",
+                                               timeout=120,
+                                               progress_message="Syncing Capacitor"):
+                    self.log("✅ Capacitor sync completed successfully")
+                else:
+                    self.log("⚠️ Capacitor sync failed, but assets were regenerated")
+                    self.log("   You may need to run 'npx cap sync android' manually")
+            finally:
+                try:
+                    os.chdir(original_cwd)
+                except:
+                    pass
+
+            # 7. Show success message
+            self.log("\n" + "=" * 50)
+            self.log("✅ ASSET REGENERATION COMPLETE")
+            self.log("=" * 50)
+            self.log("\nYou can now build the APK with the new assets.")
+            self.log("The changes have been applied to the Android project.\n")
+
+            messagebox.showinfo("Success",
+                "Assets regenerated successfully!\n\n"
+                "You can now build the APK with:\n"
+                "  • Main tab → 'Build APK' button\n\n"
+                "The new assets will be included in the next build.")
+
+        except Exception as e:
+            self.log(f"\n❌ Error during asset regeneration: {e}")
+            if self.debug_mode.get():
+                import traceback
+                self.log(traceback.format_exc())
+            messagebox.showerror("Error", f"Failed to regenerate assets:\n{e}")
+
+        finally:
+            # Re-enable button
+            self.regenerate_btn.config(state='normal')
+
     def generate_android_icons(self, source_path, output_dir):
         """Generate all Android icon sizes from source image"""
         if not PIL_AVAILABLE:

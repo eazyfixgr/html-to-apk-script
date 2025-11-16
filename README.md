@@ -105,7 +105,42 @@ python html_to_apk_converter.py
    - Wait for build process (may take several minutes)
    - Find generated APK in project directory
 
+### Updating Assets for Existing Projects
+
+**New in v2.1**: You can now change icons and splash screens without recreating the entire project!
+
+1. **Navigate to Assets Tab**:
+   - Go to "Assets (Icons & Splash)" tab
+
+2. **Select New Assets**:
+   - Choose new icon file and/or new splash screen file
+   - Preview will update automatically
+
+3. **Regenerate Assets**:
+   - Click "🔄 Regenerate Assets for Existing Project" button
+   - Confirm the regeneration
+   - Wait for process to complete
+
+4. **Build APK**:
+   - Return to main tab
+   - Click "Build APK"
+   - New assets will be included in the APK
+
+**Benefits**:
+- No need to recreate the entire project structure
+- Update only the assets you want to change
+- Quick iterative design workflow
+- Assets are automatically synced to Android project
+
 ## Recent Improvements
+
+### Version 2.1 Improvements
+
+#### New Feature: Asset Regeneration
+- **Regenerate icons and splash screens for existing projects**: No need to create a new project when you want to change assets
+- **Flexible updates**: Change icon only, splash only, or both
+- **Automatic synchronization**: Capacitor sync runs automatically after regeneration
+- **Time-saving workflow**: Update assets in seconds, not minutes
 
 ### Version 2.0 Improvements
 
