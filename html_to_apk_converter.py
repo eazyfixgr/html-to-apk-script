@@ -16,11 +16,21 @@ import time
 import queue
 import configparser
 import re
-from typing import Optional, Tuple, List
+import hashlib
+import zipfile
+import tempfile
+from typing import Optional, Tuple, List, Dict
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from tkinter.font import Font
+
+# Try to import tkinterdnd2 for drag and drop
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    TKDND_AVAILABLE = True
+except ImportError:
+    TKDND_AVAILABLE = False
 
 # Try to import PIL for image processing
 try:
@@ -29,49 +39,125 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+# Try to import optimization libraries
+try:
+    import htmlmin
+    HTMLMIN_AVAILABLE = True
+except ImportError:
+    HTMLMIN_AVAILABLE = False
+
+try:
+    import csscompressor
+    CSSCOMPRESSOR_AVAILABLE = True
+except ImportError:
+    CSSCOMPRESSOR_AVAILABLE = False
+
+try:
+    import jsmin
+    JSMIN_AVAILABLE = True
+except ImportError:
+    JSMIN_AVAILABLE = False
+
+# Try to import plyer for notifications
+try:
+    from plyer import notification
+    NOTIFICATION_AVAILABLE = True
+except ImportError:
+    NOTIFICATION_AVAILABLE = False
+
 class HTMLToAPKConverter:
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("HTML to APK Converter with Plugins")
-        self.root.geometry("900x800")
+        # Initialize root window with drag and drop support if available
+        if TKDND_AVAILABLE:
+            self.root = TkinterDnD.Tk()
+        else:
+            self.root = tk.Tk()
+
+        self.root.title("HTML to APK Converter Pro")
+        self.root.geometry("950x850")
         self.root.resizable(True, True)
-        
-        # Configuration file path
+
+        # Configuration file paths
         script_dir = Path(__file__).parent if __file__ else Path.cwd()
         self.config_file = script_dir / "html_to_apk_config.ini"
-        
+        self.recent_projects_file = script_dir / "recent_projects.json"
+        self.version_history_file = script_dir / "version_history.json"
+        self.keystore_config_file = script_dir / "keystore_config.json"
+
         # Queue for thread communication
         self.log_queue = queue.Queue()
         self.progress_queue = queue.Queue()
-        
+
         # Variables
         self.html_dir_var = tk.StringVar()
         self.app_name_var = tk.StringVar(value="MyApp")
         self.app_id_var = tk.StringVar(value="com.example.myapp")
         self.output_dir_var = tk.StringVar()
-        
+
         # Asset variables
         self.icon_file_var = tk.StringVar()
         self.splash_file_var = tk.StringVar()
         self.use_custom_assets = tk.BooleanVar(value=False)
         self.auto_generate_assets = tk.BooleanVar(value=True)
-        
+
         # Plugin selection variables
         self.selected_plugins = {}
-        
+
         # Build state
         self.is_building = False
         self.build_thread = None
         self.start_time = None
         self.current_step = 0
         self.total_steps = 12  # Increased for plugin installation steps
-        
+
         # Log window reference
         self.log_window = None
-        
+
         # Asset preview references
         self.icon_preview_label = None
         self.splash_preview_label = None
+
+        # New feature variables
+        self.dark_mode = tk.BooleanVar(value=False)
+        self.enable_optimization = tk.BooleanVar(value=True)
+        self.enable_notifications = tk.BooleanVar(value=True)
+        self.recent_projects = []
+        self.max_recent_projects = 10
+
+        # Version management
+        self.version_code = tk.IntVar(value=1)
+        self.version_name = tk.StringVar(value="1.0.0")
+        self.auto_increment_version = tk.BooleanVar(value=True)
+
+        # APK signing variables
+        self.use_release_build = tk.BooleanVar(value=False)
+        self.keystore_path = tk.StringVar()
+        self.keystore_alias = tk.StringVar()
+        self.keystore_password = tk.StringVar()
+
+        # ADB variables
+        self.auto_install_after_build = tk.BooleanVar(value=False)
+        self.selected_device = tk.StringVar()
+
+        # Theme colors
+        self.themes = {
+            'light': {
+                'bg': '#f0f0f0',
+                'fg': '#000000',
+                'select_bg': '#0078d7',
+                'select_fg': '#ffffff',
+                'button_bg': '#e1e1e1',
+                'entry_bg': '#ffffff'
+            },
+            'dark': {
+                'bg': '#2b2b2b',
+                'fg': '#ffffff',
+                'select_bg': '#0078d7',
+                'select_fg': '#ffffff',
+                'button_bg': '#3c3c3c',
+                'entry_bg': '#1e1e1e'
+            }
+        }
         
         # Available Capacitor plugins
         self.plugins = {
@@ -2305,7 +2391,808 @@ export default config;
             self.log(f"❌ Failed to copy APK: {e}")
             self.log(f"📱 APK available at: {apk_path}")
             return apk_path
-            
+
+    # ============================================================================
+    # NEW FEATURES - Dark Mode, Recent Projects, Notifications, etc.
+    # ============================================================================
+
+    def toggle_dark_mode(self):
+        """Toggle between dark and light mode"""
+        is_dark = self.dark_mode.get()
+        theme = self.themes['dark'] if is_dark else self.themes['light']
+
+        try:
+            # Update ttk style
+            style = ttk.Style()
+            style.configure('TFrame', background=theme['bg'])
+            style.configure('TLabel', background=theme['bg'], foreground=theme['fg'])
+            style.configure('TButton', background=theme['button_bg'], foreground=theme['fg'])
+            style.configure('TCheckbutton', background=theme['bg'], foreground=theme['fg'])
+
+            # Update root window
+            self.root.configure(bg=theme['bg'])
+
+            self.log(f"🎨 Switched to {'dark' if is_dark else 'light'} mode")
+
+        except Exception as e:
+            self.log(f"⚠️ Error applying theme: {e}")
+
+    def load_recent_projects(self):
+        """Load recent projects from file"""
+        try:
+            if self.recent_projects_file.exists():
+                with open(self.recent_projects_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.recent_projects = data.get('projects', [])[:self.max_recent_projects]
+        except Exception as e:
+            print(f"Error loading recent projects: {e}")
+            self.recent_projects = []
+
+    def save_recent_projects(self):
+        """Save recent projects to file"""
+        try:
+            data = {'projects': self.recent_projects[:self.max_recent_projects]}
+            with open(self.recent_projects_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Error saving recent projects: {e}")
+
+    def add_to_recent_projects(self, project_info):
+        """Add project to recent projects list"""
+        # Remove if already exists
+        self.recent_projects = [p for p in self.recent_projects
+                               if p.get('output_dir') != project_info.get('output_dir')]
+
+        # Add to front
+        self.recent_projects.insert(0, project_info)
+
+        # Keep only max items
+        self.recent_projects = self.recent_projects[:self.max_recent_projects]
+
+        # Save
+        self.save_recent_projects()
+
+        # Update UI if recent projects menu exists
+        if hasattr(self, 'recent_menu'):
+            self.update_recent_projects_menu()
+
+    def update_recent_projects_menu(self):
+        """Update recent projects dropdown menu"""
+        if not hasattr(self, 'recent_menu'):
+            return
+
+        # Clear existing items
+        self.recent_menu['menu'].delete(0, 'end')
+
+        if not self.recent_projects:
+            self.recent_menu['menu'].add_command(label="No recent projects", state='disabled')
+            return
+
+        # Add recent projects
+        for project in self.recent_projects:
+            label = f"{project.get('app_name', 'Unknown')} - {project.get('output_dir', '')}"
+            self.recent_menu['menu'].add_command(
+                label=label[:50] + '...' if len(label) > 50 else label,
+                command=lambda p=project: self.load_recent_project(p)
+            )
+
+    def load_recent_project(self, project_info):
+        """Load a recent project"""
+        try:
+            self.html_dir_var.set(project_info.get('html_dir', ''))
+            self.app_name_var.set(project_info.get('app_name', ''))
+            self.app_id_var.set(project_info.get('app_id', ''))
+            self.output_dir_var.set(project_info.get('output_dir', ''))
+
+            self.log(f"✅ Loaded recent project: {project_info.get('app_name', 'Unknown')}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load recent project: {e}")
+
+    def setup_drag_drop(self, widget):
+        """Setup drag and drop for HTML directory"""
+        if not TKDND_AVAILABLE:
+            return
+
+        def drop(event):
+            # Get the dropped file path
+            path = event.data
+            # Remove curly braces if present
+            path = path.strip('{}')
+
+            if Path(path).is_dir():
+                self.html_dir_var.set(path)
+                self.log(f"📂 Dropped folder: {path}")
+            else:
+                messagebox.showwarning("Invalid Drop", "Please drop a folder, not a file")
+
+        widget.drop_target_register(DND_FILES)
+        widget.dnd_bind('<<Drop>>', drop)
+
+    def send_notification(self, title, message):
+        """Send desktop notification"""
+        if not self.enable_notifications.get() or not NOTIFICATION_AVAILABLE:
+            return
+
+        try:
+            notification.notify(
+                title=title,
+                message=message,
+                app_name="HTML to APK Converter",
+                timeout=10
+            )
+        except Exception as e:
+            print(f"Notification error: {e}")
+
+    # ============================================================================
+    # APK ANALYZER
+    # ============================================================================
+
+    def analyze_apk(self, apk_path):
+        """Analyze APK and show detailed information"""
+        if not apk_path or not Path(apk_path).exists():
+            messagebox.showerror("Error", "APK file not found")
+            return
+
+        try:
+            analysis = {}
+
+            # Basic file info
+            apk_file = Path(apk_path)
+            file_size = apk_file.stat().st_size
+            analysis['file_size'] = file_size
+            analysis['file_size_mb'] = file_size / (1024 * 1024)
+
+            # Analyze APK contents using zipfile
+            with zipfile.ZipFile(apk_path, 'r') as apk_zip:
+                analysis['file_count'] = len(apk_zip.filelist)
+
+                # Calculate size breakdown
+                size_breakdown = {}
+                for file_info in apk_zip.filelist:
+                    ext = Path(file_info.filename).suffix.lower() or 'other'
+                    size_breakdown[ext] = size_breakdown.get(ext, 0) + file_info.file_size
+
+                analysis['size_breakdown'] = size_breakdown
+
+                # Check for specific files
+                analysis['has_manifest'] = 'AndroidManifest.xml' in apk_zip.namelist()
+                analysis['has_dex'] = any('classes' in f and f.endswith('.dex') for f in apk_zip.namelist())
+
+            # Try to get APK info using aapt
+            aapt_info = self.get_aapt_info(apk_path)
+            if aapt_info:
+                analysis.update(aapt_info)
+
+            # Show analysis window
+            self.show_apk_analysis_window(analysis, apk_path)
+
+        except Exception as e:
+            messagebox.showerror("Analysis Error", f"Failed to analyze APK: {e}")
+
+    def get_aapt_info(self, apk_path):
+        """Get APK info using aapt tool"""
+        try:
+            android_home = os.environ.get('ANDROID_HOME')
+            if not android_home:
+                return None
+
+            aapt_path = Path(android_home) / "build-tools"
+            aapt_versions = list(aapt_path.glob("*/aapt*"))
+
+            if not aapt_versions:
+                return None
+
+            aapt_exe = aapt_versions[-1]  # Use latest version
+
+            result = subprocess.run(
+                [str(aapt_exe), 'dump', 'badging', apk_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                info = {}
+                for line in result.stdout.split('\n'):
+                    if line.startswith('package:'):
+                        # Extract package name and version
+                        import re
+                        name_match = re.search(r"name='([^']+)'", line)
+                        version_match = re.search(r"versionName='([^']+)'", line)
+                        code_match = re.search(r"versionCode='([^']+)'", line)
+
+                        if name_match:
+                            info['package_name'] = name_match.group(1)
+                        if version_match:
+                            info['version_name'] = version_match.group(1)
+                        if code_match:
+                            info['version_code'] = code_match.group(1)
+
+                    elif line.startswith('sdkVersion:'):
+                        info['min_sdk'] = line.split(':')[1].strip().strip("'")
+
+                    elif line.startswith('targetSdkVersion:'):
+                        info['target_sdk'] = line.split(':')[1].strip().strip("'")
+
+                    elif line.startswith('uses-permission:'):
+                        if 'permissions' not in info:
+                            info['permissions'] = []
+                        perm_match = re.search(r"name='([^']+)'", line)
+                        if perm_match:
+                            info['permissions'].append(perm_match.group(1))
+
+                return info
+
+        except Exception as e:
+            print(f"aapt error: {e}")
+            return None
+
+    def show_apk_analysis_window(self, analysis, apk_path):
+        """Show APK analysis in a new window"""
+        window = tk.Toplevel(self.root)
+        window.title(f"APK Analysis - {Path(apk_path).name}")
+        window.geometry("600x700")
+
+        # Create scrolled text widget
+        text_frame = ttk.Frame(window, padding="10")
+        text_frame.pack(fill=tk.BOTH, expand=True)
+
+        text = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, width=70, height=35)
+        text.pack(fill=tk.BOTH, expand=True)
+
+        # Build analysis report
+        report = f"APK ANALYSIS REPORT\n"
+        report += "=" * 60 + "\n\n"
+        report += f"File: {Path(apk_path).name}\n"
+        report += f"Path: {apk_path}\n\n"
+
+        report += "FILE INFORMATION\n"
+        report += "-" * 60 + "\n"
+        report += f"Size: {analysis['file_size_mb']:.2f} MB ({analysis['file_size']:,} bytes)\n"
+        report += f"Total Files: {analysis.get('file_count', 'N/A')}\n\n"
+
+        if 'package_name' in analysis:
+            report += "PACKAGE INFORMATION\n"
+            report += "-" * 60 + "\n"
+            report += f"Package Name: {analysis.get('package_name', 'N/A')}\n"
+            report += f"Version Name: {analysis.get('version_name', 'N/A')}\n"
+            report += f"Version Code: {analysis.get('version_code', 'N/A')}\n"
+            report += f"Min SDK: {analysis.get('min_sdk', 'N/A')}\n"
+            report += f"Target SDK: {analysis.get('target_sdk', 'N/A')}\n\n"
+
+        if 'size_breakdown' in analysis:
+            report += "SIZE BREAKDOWN BY FILE TYPE\n"
+            report += "-" * 60 + "\n"
+            sorted_breakdown = sorted(analysis['size_breakdown'].items(),
+                                    key=lambda x: x[1], reverse=True)
+            for ext, size in sorted_breakdown[:15]:  # Top 15 types
+                size_mb = size / (1024 * 1024)
+                percent = (size / analysis['file_size']) * 100
+                report += f"{ext:15s} {size_mb:8.2f} MB ({percent:5.1f}%)\n"
+            report += "\n"
+
+        if 'permissions' in analysis:
+            report += "PERMISSIONS\n"
+            report += "-" * 60 + "\n"
+            for perm in analysis['permissions']:
+                # Shorten permission names
+                short_perm = perm.split('.')[-1]
+                report += f"  • {short_perm}\n"
+            report += f"\nTotal: {len(analysis['permissions'])} permissions\n\n"
+
+        report += "COMPONENTS FOUND\n"
+        report += "-" * 60 + "\n"
+        report += f"AndroidManifest.xml: {'✓ Yes' if analysis.get('has_manifest') else '✗ No'}\n"
+        report += f"DEX Files: {'✓ Yes' if analysis.get('has_dex') else '✗ No'}\n"
+
+        # Insert report
+        text.insert(1.0, report)
+        text.config(state='disabled')
+
+        # Close button
+        ttk.Button(window, text="Close", command=window.destroy).pack(pady=10)
+
+    # ============================================================================
+    # VERSION MANAGEMENT
+    # ============================================================================
+
+    def increment_version(self):
+        """Increment version code and optionally version name"""
+        try:
+            # Increment version code
+            new_code = self.version_code.get() + 1
+            self.version_code.set(new_code)
+
+            # Optionally increment version name
+            current_name = self.version_name.get()
+            parts = current_name.split('.')
+
+            if len(parts) == 3:
+                major, minor, patch = parts
+                try:
+                    patch = int(patch) + 1
+                    new_name = f"{major}.{minor}.{patch}"
+                    self.version_name.set(new_name)
+                except ValueError:
+                    pass
+
+            self.log(f"📊 Version updated: {new_code} ({self.version_name.get()})")
+            return new_code, self.version_name.get()
+
+        except Exception as e:
+            self.log(f"⚠️ Error incrementing version: {e}")
+            return self.version_code.get(), self.version_name.get()
+
+    def save_version_history(self, apk_path, version_code, version_name):
+        """Save build to version history"""
+        try:
+            history = []
+            if self.version_history_file.exists():
+                with open(self.version_history_file, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+
+            build_info = {
+                'timestamp': datetime.now().isoformat(),
+                'version_code': version_code,
+                'version_name': version_name,
+                'apk_path': str(apk_path),
+                'apk_size': Path(apk_path).stat().st_size if Path(apk_path).exists() else 0,
+                'app_name': self.app_name_var.get(),
+                'app_id': self.app_id_var.get()
+            }
+
+            history.insert(0, build_info)
+
+            # Keep last 50 builds
+            history = history[:50]
+
+            with open(self.version_history_file, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=2)
+
+        except Exception as e:
+            self.log(f"⚠️ Error saving version history: {e}")
+
+    # ============================================================================
+    # BUILD OPTIMIZATION
+    # ============================================================================
+
+    def optimize_web_assets(self, www_dir):
+        """Optimize HTML, CSS, JS files for smaller size"""
+        if not self.enable_optimization.get():
+            self.log("ℹ️ Build optimization disabled")
+            return True
+
+        self.log("🎯 Optimizing web assets...")
+
+        try:
+            optimized_count = 0
+            total_saved = 0
+
+            www_path = Path(www_dir)
+
+            # Optimize HTML files
+            if HTMLMIN_AVAILABLE:
+                for html_file in www_path.rglob("*.html"):
+                    try:
+                        with open(html_file, 'r', encoding='utf-8') as f:
+                            original = f.read()
+
+                        original_size = len(original)
+                        minified = htmlmin.minify(original, remove_comments=True, remove_empty_space=True)
+
+                        with open(html_file, 'w', encoding='utf-8') as f:
+                            f.write(minified)
+
+                        saved = original_size - len(minified)
+                        total_saved += saved
+                        optimized_count += 1
+
+                        self.log(f"  📄 {html_file.name}: saved {saved} bytes")
+
+                    except Exception as e:
+                        self.log(f"  ⚠️ Error minifying {html_file.name}: {e}")
+            else:
+                self.log("  ⚠️ htmlmin not available, skipping HTML optimization")
+
+            # Optimize CSS files
+            if CSSCOMPRESSOR_AVAILABLE:
+                for css_file in www_path.rglob("*.css"):
+                    try:
+                        with open(css_file, 'r', encoding='utf-8') as f:
+                            original = f.read()
+
+                        original_size = len(original)
+                        minified = csscompressor.compress(original)
+
+                        with open(css_file, 'w', encoding='utf-8') as f:
+                            f.write(minified)
+
+                        saved = original_size - len(minified)
+                        total_saved += saved
+                        optimized_count += 1
+
+                        self.log(f"  🎨 {css_file.name}: saved {saved} bytes")
+
+                    except Exception as e:
+                        self.log(f"  ⚠️ Error minifying {css_file.name}: {e}")
+            else:
+                self.log("  ⚠️ csscompressor not available, skipping CSS optimization")
+
+            # Optimize JS files
+            if JSMIN_AVAILABLE:
+                for js_file in www_path.rglob("*.js"):
+                    try:
+                        with open(js_file, 'r', encoding='utf-8') as f:
+                            original = f.read()
+
+                        original_size = len(original)
+                        minified = jsmin.jsmin(original)
+
+                        with open(js_file, 'w', encoding='utf-8') as f:
+                            f.write(minified)
+
+                        saved = original_size - len(minified)
+                        total_saved += saved
+                        optimized_count += 1
+
+                        self.log(f"  📜 {js_file.name}: saved {saved} bytes")
+
+                    except Exception as e:
+                        self.log(f"  ⚠️ Error minifying {js_file.name}: {e}")
+            else:
+                self.log("  ⚠️ jsmin not available, skipping JS optimization")
+
+            # Optimize images
+            if PIL_AVAILABLE:
+                for img_file in list(www_path.rglob("*.png")) + list(www_path.rglob("*.jpg")) + list(www_path.rglob("*.jpeg")):
+                    try:
+                        with Image.open(img_file) as img:
+                            original_size = img_file.stat().st_size
+
+                            # Save with optimization
+                            img.save(img_file, optimize=True, quality=85)
+
+                            new_size = img_file.stat().st_size
+                            saved = original_size - new_size
+
+                            if saved > 0:
+                                total_saved += saved
+                                optimized_count += 1
+                                self.log(f"  🖼️  {img_file.name}: saved {saved} bytes")
+
+                    except Exception as e:
+                        self.log(f"  ⚠️ Error optimizing {img_file.name}: {e}")
+            else:
+                self.log("  ⚠️ PIL not available, skipping image optimization")
+
+            total_saved_kb = total_saved / 1024
+            self.log(f"✅ Optimized {optimized_count} files, saved {total_saved_kb:.2f} KB")
+
+            return True
+
+        except Exception as e:
+            self.log(f"❌ Error during optimization: {e}")
+            return False
+
+    # ============================================================================
+    # APK SIGNING & RELEASE BUILD
+    # ============================================================================
+
+    def generate_keystore(self):
+        """Generate a new keystore for signing"""
+        # Create dialog for keystore generation
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Generate Keystore")
+        dialog.geometry("500x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Generate Android Keystore", font=("TkDefaultFont", 14, "bold")).pack(pady=10)
+
+        frame = ttk.Frame(dialog, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Alias
+        ttk.Label(frame, text="Alias (key name):").grid(row=0, column=0, sticky=tk.W, pady=5)
+        alias_var = tk.StringVar(value="my-key-alias")
+        ttk.Entry(frame, textvariable=alias_var, width=40).grid(row=0, column=1, pady=5)
+
+        # Password
+        ttk.Label(frame, text="Password:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        password_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=password_var, show="*", width=40).grid(row=1, column=1, pady=5)
+
+        # Confirm Password
+        ttk.Label(frame, text="Confirm Password:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        confirm_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=confirm_var, show="*", width=40).grid(row=2, column=1, pady=5)
+
+        # Validity
+        ttk.Label(frame, text="Validity (years):").grid(row=3, column=0, sticky=tk.W, pady=5)
+        validity_var = tk.IntVar(value=25)
+        ttk.Spinbox(frame, from_=1, to=100, textvariable=validity_var, width=38).grid(row=3, column=1, pady=5)
+
+        # Organization info
+        ttk.Label(frame, text="Your Name:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        name_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=name_var, width=40).grid(row=4, column=1, pady=5)
+
+        ttk.Label(frame, text="Organization:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        org_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=org_var, width=40).grid(row=5, column=1, pady=5)
+
+        def create_keystore():
+            alias = alias_var.get().strip()
+            password = password_var.get()
+            confirm = confirm_var.get()
+            validity = validity_var.get()
+            name = name_var.get().strip()
+            org = org_var.get().strip()
+
+            if not alias or not password:
+                messagebox.showerror("Error", "Alias and password are required")
+                return
+
+            if password != confirm:
+                messagebox.showerror("Error", "Passwords do not match")
+                return
+
+            if len(password) < 6:
+                messagebox.showerror("Error", "Password must be at least 6 characters")
+                return
+
+            # Ask where to save keystore
+            keystore_path = filedialog.asksaveasfilename(
+                title="Save Keystore",
+                defaultextension=".jks",
+                filetypes=[("Java Keystore", "*.jks"), ("All files", "*.*")]
+            )
+
+            if not keystore_path:
+                return
+
+            try:
+                # Generate keystore using keytool
+                dname = f"CN={name or 'Unknown'}, OU={org or 'Unknown'}, O={org or 'Unknown'}, C=US"
+
+                cmd = [
+                    'keytool',
+                    '-genkeypair',
+                    '-v',
+                    '-keystore', keystore_path,
+                    '-alias', alias,
+                    '-keyalg', 'RSA',
+                    '-keysize', '2048',
+                    '-validity', str(validity * 365),
+                    '-storepass', password,
+                    '-keypass', password,
+                    '-dname', dname
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+                if result.returncode == 0:
+                    messagebox.showinfo("Success", f"Keystore generated successfully!\n\nPath: {keystore_path}")
+
+                    # Save keystore config
+                    self.keystore_path.set(keystore_path)
+                    self.keystore_alias.set(alias)
+                    self.keystore_password.set(password)
+
+                    self.save_keystore_config(keystore_path, alias, password)
+
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Error", f"Failed to generate keystore:\n{result.stderr}")
+
+            except FileNotFoundError:
+                messagebox.showerror("Error", "keytool not found. Please install Java JDK and add it to PATH")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error generating keystore: {e}")
+
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=20)
+
+        ttk.Button(btn_frame, text="Generate", command=create_keystore).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+    def save_keystore_config(self, path, alias, password):
+        """Save keystore configuration"""
+        try:
+            config = {
+                'path': path,
+                'alias': alias,
+                'password': password  # In production, encrypt this!
+            }
+
+            with open(self.keystore_config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+
+        except Exception as e:
+            print(f"Error saving keystore config: {e}")
+
+    def load_keystore_config(self):
+        """Load keystore configuration"""
+        try:
+            if self.keystore_config_file.exists():
+                with open(self.keystore_config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+
+                self.keystore_path.set(config.get('path', ''))
+                self.keystore_alias.set(config.get('alias', ''))
+                self.keystore_password.set(config.get('password', ''))
+
+        except Exception as e:
+            print(f"Error loading keystore config: {e}")
+
+    def build_signed_apk(self, project_dir, app_name):
+        """Build and sign a release APK"""
+        self.log("🔐 Building signed release APK...")
+
+        android_dir = project_dir / "android"
+        if not android_dir.exists():
+            self.log("❌ Android directory not found")
+            return None
+
+        keystore_path = self.keystore_path.get().strip()
+        keystore_alias = self.keystore_alias.get().strip()
+        keystore_password = self.keystore_password.get().strip()
+
+        if not keystore_path or not Path(keystore_path).exists():
+            self.log("❌ Keystore not found. Please configure signing or generate a keystore.")
+            return None
+
+        if not keystore_alias or not keystore_password:
+            self.log("❌ Keystore alias and password required")
+            return None
+
+        try:
+            os.chdir(android_dir)
+
+            # Configure signing in gradle.properties
+            gradle_props = android_dir / "gradle.properties"
+            with open(gradle_props, 'a', encoding='utf-8') as f:
+                f.write(f"\n# Signing configuration\n")
+                f.write(f"RELEASE_STORE_FILE={keystore_path}\n")
+                f.write(f"RELEASE_STORE_PASSWORD={keystore_password}\n")
+                f.write(f"RELEASE_KEY_ALIAS={keystore_alias}\n")
+                f.write(f"RELEASE_KEY_PASSWORD={keystore_password}\n")
+
+            # Build release APK
+            gradlew = "./gradlew" if os.name != 'nt' else "gradlew.bat"
+
+            self.log("🔨 Building release APK (this may take several minutes)...")
+
+            if not self.run_command_with_timeout(f"{gradlew} assembleRelease",
+                                                 timeout=600,
+                                                 progress_message="Building signed release APK"):
+                self.log("❌ Release build failed")
+                return None
+
+            # Find release APK
+            release_apk_path = android_dir / "app" / "build" / "outputs" / "apk" / "release"
+            apk_files = list(release_apk_path.glob("*.apk"))
+
+            if not apk_files:
+                self.log("❌ Release APK not found")
+                return None
+
+            apk_path = apk_files[0]
+
+            # Copy to project directory with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            final_apk_name = f"{app_name}-release-{timestamp}.apk"
+            final_apk_path = project_dir / final_apk_name
+
+            shutil.copy2(apk_path, final_apk_path)
+
+            apk_size = final_apk_path.stat().st_size / (1024 * 1024)
+
+            self.log("✅ Signed release APK built successfully!")
+            self.log(f"📱 APK: {final_apk_path}")
+            self.log(f"📏 Size: {apk_size:.2f} MB")
+
+            return final_apk_path
+
+        except Exception as e:
+            self.log(f"❌ Error building signed APK: {e}")
+            return None
+
+    # ============================================================================
+    # ADB INTEGRATION
+    # ============================================================================
+
+    def detect_adb_devices(self):
+        """Detect connected Android devices via ADB"""
+        try:
+            result = subprocess.run(
+                ['adb', 'devices'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode != 0:
+                return []
+
+            devices = []
+            lines = result.stdout.strip().split('\n')[1:]  # Skip header
+
+            for line in lines:
+                if line.strip() and '\t' in line:
+                    device_id, status = line.split('\t')
+                    if status.strip() == 'device':
+                        devices.append(device_id.strip())
+
+            return devices
+
+        except FileNotFoundError:
+            self.log("⚠️ ADB not found. Install Android SDK platform tools.")
+            return []
+        except Exception as e:
+            self.log(f"⚠️ Error detecting devices: {e}")
+            return []
+
+    def install_apk_to_device(self, apk_path, device_id=None):
+        """Install APK to connected device via ADB"""
+        if not apk_path or not Path(apk_path).exists():
+            self.log("❌ APK file not found")
+            return False
+
+        try:
+            cmd = ['adb']
+
+            if device_id:
+                cmd.extend(['-s', device_id])
+
+            cmd.extend(['install', '-r', str(apk_path)])  # -r = replace existing
+
+            self.log(f"📱 Installing APK to device{' ' + device_id if device_id else ''}...")
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+            if result.returncode == 0 and 'Success' in result.stdout:
+                self.log(f"✅ APK installed successfully!")
+                return True
+            else:
+                self.log(f"❌ Installation failed: {result.stderr or result.stdout}")
+                return False
+
+        except FileNotFoundError:
+            self.log("❌ ADB not found. Install Android SDK platform tools.")
+            return False
+        except subprocess.TimeoutExpired:
+            self.log("❌ Installation timed out")
+            return False
+        except Exception as e:
+            self.log(f"❌ Error installing APK: {e}")
+            return False
+
+    def launch_app_on_device(self, package_name, device_id=None):
+        """Launch app on device after installation"""
+        try:
+            cmd = ['adb']
+
+            if device_id:
+                cmd.extend(['-s', device_id])
+
+            # Get main activity
+            cmd.extend(['shell', 'monkey', '-p', package_name, '-c', 'android.intent.category.LAUNCHER', '1'])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                self.log(f"🚀 Launched app: {package_name}")
+                return True
+            else:
+                self.log(f"⚠️ Could not launch app: {result.stderr}")
+                return False
+
+        except Exception as e:
+            self.log(f"⚠️ Error launching app: {e}")
+            return False
+
     def run(self):
         """Run the GUI application"""
         try:

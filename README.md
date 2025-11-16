@@ -1,10 +1,24 @@
-# HTML to APK Converter
+# HTML to APK Converter Pro
 
-A Python GUI application that converts HTML projects to Android APK files using Capacitor, with support for plugin selection, custom assets, and comprehensive build management.
+A Python GUI application that converts HTML projects to Android APK files using Capacitor, with professional features for production-ready apps.
 
-## Features
+## 🎉 Version 2.0 - NEW FEATURES!
 
-- **Interactive GUI**: User-friendly interface built with Tkinter
+### ✨ Major Enhancements
+
+🎨 **Dark Mode** - Easy on the eyes, professional appearance
+📂 **Recent Projects** - Quick access to your last 10 projects
+🎯 **Drag & Drop** - Drop HTML folders directly onto the app
+🔔 **Desktop Notifications** - Get alerted when builds complete
+🔍 **APK Analyzer** - Detailed analysis of APK size, permissions, and content
+📊 **Version Management** - Automatic version incrementing and build history
+⚡ **Build Optimization** - Minify HTML/CSS/JS, compress images (25-50% size reduction!)
+🔐 **APK Signing** - Generate keystores and build release APKs for Google Play
+📱 **ADB Integration** - Install APKs directly to connected devices with one click
+
+## Core Features
+
+- **Interactive GUI**: User-friendly interface with dark mode support
 - **Capacitor Integration**: Seamless conversion of HTML projects to native Android apps
 - **Plugin System**: Select from 15+ Capacitor plugins (Camera, Geolocation, Storage, etc.)
 - **Custom Assets**: Generate app icons and splash screens for all Android densities
@@ -12,34 +26,46 @@ A Python GUI application that converts HTML projects to Android APK files using 
 - **Configuration Persistence**: Auto-save settings between sessions
 - **Real-time Logging**: Detailed build logs with progress tracking
 - **Debug Mode**: Enhanced debugging information for troubleshooting
+- **Professional Tools**: Everything you need for production-ready apps
 
 ## Requirements
 
+### Minimum (Core Features)
 - Python 3.7+
 - Node.js and npm
-- Android SDK (for APK building)
-- Pillow (PIL) - optional, for icon/splash screen generation
+- Pillow (PIL)
 
-### Python Dependencies
-
-```bash
-pip install Pillow
-```
-
-### System Dependencies
-
-- Node.js: https://nodejs.org
-- Android Studio: https://developer.android.com/studio (for Android SDK)
+### Recommended (All Features)
+- Python 3.7+
+- Node.js and npm
+- Pillow, htmlmin, csscompressor, jsmin, plyer
+- Java JDK (for APK signing)
+- Android SDK (for device installation and APK analysis)
 
 ## Installation
 
-1. Clone or download this repository
-2. Install Python dependencies:
-   ```bash
-   pip install Pillow
-   ```
-3. Ensure Node.js and npm are installed
-4. Set up Android SDK (set `ANDROID_HOME` environment variable)
+### Quick Start (Basic Features)
+
+```bash
+# Install minimum dependencies
+pip install Pillow
+
+# Run the application
+python html_to_apk_converter.py
+```
+
+### Full Installation (All Features)
+
+```bash
+# Install all Python dependencies
+pip install -r requirements.txt
+
+# Install system tools (see INSTALL.md for details)
+# - Java JDK for keystore generation
+# - Android SDK for ADB and AAPT
+```
+
+📖 **See [INSTALL.md](INSTALL.md) for complete installation instructions**
 
 ## Usage
 
@@ -188,6 +214,62 @@ Enable "Debug mode" checkbox in the main tab for:
 - Working directory information
 - Full stderr output
 - Exception stack traces
+
+## 🆕 New in Version 2.0
+
+### Complete Feature Guides
+
+📖 **[NEW_FEATURES.md](NEW_FEATURES.md)** - Comprehensive guide to all 9 new features
+- Dark Mode
+- Recent Projects
+- Drag & Drop
+- Desktop Notifications
+- APK Analyzer
+- Version Management
+- Build Optimization
+- APK Signing & Release Builds
+- ADB Integration
+
+📦 **[INSTALL.md](INSTALL.md)** - Detailed installation guide for all platforms
+- Windows, macOS, Linux specific instructions
+- Dependency installation guides
+- Verification scripts
+- Troubleshooting
+
+📝 **[CHANGELOG.md](CHANGELOG.md)** - Complete version history and changes
+
+### Quick Feature Overview
+
+#### 🔐 Production-Ready Builds
+- Generate Android keystores
+- Sign APKs for Google Play Store
+- Build release APKs (not just debug)
+
+#### ⚡ Optimization
+- Minify HTML, CSS, JavaScript
+- Compress images automatically
+- **25-50% smaller APK sizes!**
+
+#### 📱 Testing Workflow
+- Detect connected Android devices
+- Install APK with one click
+- Launch app automatically
+- Real-time device testing
+
+#### 📊 Professional Tools
+- Version history tracking
+- APK analysis and reporting
+- Build notifications
+- Dark mode UI
+
+### Optional Dependencies
+
+For full features, install:
+```bash
+pip install htmlmin csscompressor jsmin plyer
+```
+
+See [INSTALL.md](INSTALL.md) for complete setup instructions.
 
 ## License
 

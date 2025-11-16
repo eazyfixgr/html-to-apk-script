@@ -1,0 +1,33 @@
+# HTML to APK Converter - Python Dependencies
+
+# Core dependencies (required)
+Pillow>=10.0.0          # Image processing for icons and splash screens
+
+# Optimization libraries (optional but recommended)
+htmlmin>=0.1.12         # HTML minification
+csscompressor>=0.9.5    # CSS compression
+jsmin>=3.0.1            # JavaScript minification
+
+# Desktop notifications (optional)
+plyer>=2.1.0            # Cross-platform desktop notifications
+
+# Drag and Drop support (optional, Windows/Mac/Linux)
+#tkinterdnd2>=0.3.0     # Drag and drop for tkinter
+#                       # Note: May require manual installation on some systems
+#                       # Install with: pip install tkinterdnd2
+
+# Installation instructions:
+# Basic install (required only):
+#   pip install Pillow
+#
+# Full install (all features):
+#   pip install -r requirements.txt
+#
+# Windows note:
+#   Some packages may require Visual C++ Build Tools
+#
+# Linux note:
+#   May need: sudo apt-get install python3-tk python3-pil python3-pil.imagetk
+#
+# macOS note:
+#   May need: brew install python-tk
